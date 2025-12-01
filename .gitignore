@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.log
+
+# Environments
+.venv/
+.venv312/
+
+# Streamlit
+.streamlit/
+
+# Playwright
+playwright-report/
+test-results/
+*.trace.zip
+
+# OS/IDE
+.vscode/
+Thumbs.db
+.DS_Store
+
+# Misc build outputs
+dist/
+build/
+
