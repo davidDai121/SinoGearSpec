@@ -1,11 +1,27 @@
 import sys
+import json
 import time
 from playwright.sync_api import sync_playwright
-
 def scrape(url):
+    # 核心修复: 必须在任何打印语句或 API 监听之前设置 stdout 的编码
+    sys.stdout.reconfigure(encoding='utf-8', errors='ignore')
+    
+    api_data = None
+    
+    def handle_response(response):
+        nonlocal api_data
+        # 监听易车配置接口
+        if "config/getconfig" in response.url and response.status == 200:
+            try:
+                data = response.json()
+                if data and "data" in data and "carList" in data["data"]:
+                    api_data = data
+            except:
+                pass
+
     try:
         with sync_playwright() as p:
-            # 1. 启动参数
+            # 启动浏览器 (Headless=True 效率更高)
             browser = p.chromium.launch(
                 headless=True, 
                 args=['--disable-blink-features=AutomationControlled']
@@ -15,47 +31,37 @@ def scrape(url):
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                 viewport={'width': 1920, 'height': 1080}
             )
-
-            context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-            """)
-
-            page = context.new_page()
+            context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
-            # 2. 访问网页
-            # print(f"DEBUG: Navigating to {url}...", file=sys.stderr)
-            page.goto(url, timeout=90000)
-
-            # === V6.7 核心升级：等待网络空闲 ===
-            # 这行代码会等待页面所有的 API 数据包都请求完毕才继续
-            # 是解决“网页只有骨架没有数据”的神器
-            try:
-                page.wait_for_load_state('networkidle', timeout=10000)
-            except:
-                pass # 如果超时也不要在意，继续往下走
-
-            # 3. 智能等待元素
+            page = context.new_page()
+            page.on("response", handle_response)
+            
+            page.goto(url, timeout=60000)
+            
+            # 滚动并等待数据加载
             try:
                 page.wait_for_selector(".param-table", state="attached", timeout=15000)
-            except:
-                pass
+            except: pass
             
-            # 4. 增强滚动 (触发懒加载)
             for _ in range(3):
                 page.evaluate("window.scrollBy(0, 1000)")
                 page.wait_for_timeout(1000)
+                if api_data: break
             
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(2000)
+            # 如果没抓到 API，最后尝试等待 3 秒
+            if not api_data:
+                page.wait_for_timeout(3000)
             
             content = page.content()
             browser.close()
             
-            # 5. 输出
-            sys.stdout.reconfigure(encoding='utf-8')
-            print(content)
+            # --- 输出 ---
+            if api_data:
+                print("JSON_START")
+                print(json.dumps(api_data, ensure_ascii=False))
+            else:
+                print("HTML_START")
+                print(content)
             
     except Exception as e:
         print(f"ERROR: {str(e)}")
